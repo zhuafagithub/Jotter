@@ -1,0 +1,48 @@
+/** 待办状态：未开始 / 进行中 / 已完成 */
+export type TodoStatus = 'pending' | 'active' | 'done'
+
+/** 待办条目 */
+export interface TodoItem {
+  id: string
+  title: string
+  /** 富文本 HTML（TipTap 输出） */
+  content: string
+  status: TodoStatus
+  /** 所属文件夹 id，null 表示未分类 */
+  folderId: string | null
+  /** 截止 / 提醒时间（毫秒时间戳），null 表示未设置 */
+  dueAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** 笔记条目 */
+export interface NoteItem {
+  id: string
+  title: string
+  content: string
+  folderId: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** 文件夹（待办与笔记各自独立） */
+export interface Folder {
+  id: string
+  name: string
+  kind: 'todo' | 'note'
+  createdAt: number
+}
+
+/** 本地持久化的完整数据结构（data.json） */
+export interface AppData {
+  todos: TodoItem[]
+  notes: NoteItem[]
+  folders: Folder[]
+}
+
+/** 左侧导航视图 */
+export type ViewKind = 'todo' | 'note' | 'test'
+
+/** 待办排序方式：智能分组 / 按时间 / 按创建 / 按状态 */
+export type TodoSort = 'smart' | 'due' | 'created' | 'status'
