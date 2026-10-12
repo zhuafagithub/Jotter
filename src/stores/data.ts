@@ -30,6 +30,7 @@ function migrate(raw: Partial<AppData>): void {
       status,
       folderId: (t.folderId as string | null) ?? null,
       dueAt: (t.dueAt as number | null) ?? null,
+      order: (t.order as number | null) ?? null,
       createdAt: Number(t.createdAt ?? Date.now()),
       updatedAt: Number(t.updatedAt ?? t.createdAt ?? Date.now()),
     }
@@ -41,6 +42,7 @@ function migrate(raw: Partial<AppData>): void {
       title: String(n.title ?? ''),
       content: String(n.content ?? ''),
       folderId: (n.folderId as string | null) ?? null,
+      order: (n.order as number | null) ?? null,
       createdAt: Number(n.createdAt ?? Date.now()),
       updatedAt: Number(n.updatedAt ?? n.createdAt ?? Date.now()),
     }
@@ -106,6 +108,12 @@ watch(
 
 // ---------- 待办 / 笔记 CRUD ----------
 
+/** 取当前最小 order（新条目用于置顶到自定义排序最上方），无条目返回 0 */
+function topOrder(items: { order: number | null }[]): number {
+  const orders = items.map((i) => i.order).filter((v): v is number => v != null)
+  return orders.length ? Math.min(...orders) - 1 : 0
+}
+
 export function createTodo(folderId: string | null = null): TodoItem {
   const now = Date.now()
   const item: TodoItem = {
@@ -115,6 +123,7 @@ export function createTodo(folderId: string | null = null): TodoItem {
     status: 'pending',
     folderId,
     dueAt: null,
+    order: topOrder(store.todos),
     createdAt: now,
     updatedAt: now,
   }
@@ -130,6 +139,7 @@ export function createNote(folderId: string | null = null): NoteItem {
     title: '',
     content: '',
     folderId,
+    order: topOrder(store.notes),
     createdAt: now,
     updatedAt: now,
   }

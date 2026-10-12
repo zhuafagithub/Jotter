@@ -385,7 +385,7 @@ const moreOpen = ref(false)
 }
 
 .detail-content {
-  max-width: 720px;
+  max-width: min(1080px, 100%);
   margin: 0 auto;
   padding: 8px 32px 48px;
   height: 100%;

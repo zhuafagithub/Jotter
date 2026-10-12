@@ -16,7 +16,7 @@
   --red: #ff4d4f;
   --orange: #faad14;
   --hover: rgba(0, 0, 0, 0.045);
-  --selected: #ececee;
+  --selected: #d8e0f2;
   --shadow-pop: 0 4px 12px rgba(0, 0, 0, 0.08);
   --scrollbar-thumb: rgba(0, 0, 0, 0.16);
   --code-comment: #9aa3af;
@@ -46,7 +46,7 @@ html.dark {
   --red: #ff5c5e;
   --orange: #faad14;
   --hover: rgba(255, 255, 255, 0.055);
-  --selected: #2c2c2e;
+  --selected: #34343c;
   --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.45);
   --scrollbar-thumb: rgba(255, 255, 255, 0.16);
   --code-comment: #6b7280;
@@ -84,7 +84,7 @@ body {
   line-height: 1.6;
   color: var(--text);
   background: var(--bg);
-  font-synthesis: none;
+  font-synthesis: style; /* 允许合成斜体（中文无斜体字面，需合成倾斜）；加粗用真实字重 */
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -283,12 +283,36 @@ select {
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+  position: relative;
+}
+/* 悬停在链接上提示跳转方式 */
+.ProseMirror a::after {
+  content: 'Ctrl + 点击打开链接';
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 7px);
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 80;
+}
+.ProseMirror a:hover::after {
+  opacity: 1;
 }
 .ProseMirror img {
   max-width: 100%;
   border-radius: 8px;
   display: block;
   margin: 8px 0;
+  cursor: zoom-in;
 }
 .ProseMirror code {
   background: var(--hover);

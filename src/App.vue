@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Undo2, X } from 'lucide-vue-next'
 import {
@@ -41,6 +41,37 @@ function onKeydown(event: KeyboardEvent): void {
 
 let unlistenClose: (() => void) | null = null
 
+// ---------- 中间列表宽度拖拽（260 ~ 560，记忆上次宽度） ----------
+const LIST_MIN = 260
+const LIST_MAX = 560
+const listWidth = ref(Math.min(Math.max(Number(localStorage.getItem('ui.listWidth')) || 300, LIST_MIN), LIST_MAX))
+const resizing = ref(false)
+let resizeStartX = 0
+let resizeStartW = 0
+
+function startResize(e: MouseEvent): void {
+  resizing.value = true
+  resizeStartX = e.clientX
+  resizeStartW = listWidth.value
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onResize)
+  window.addEventListener('mouseup', stopResize)
+}
+
+function onResize(e: MouseEvent): void {
+  listWidth.value = Math.min(Math.max(resizeStartW + (e.clientX - resizeStartX), LIST_MIN), LIST_MAX)
+}
+
+function stopResize(): void {
+  resizing.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  localStorage.setItem('ui.listWidth', String(listWidth.value))
+  window.removeEventListener('mousemove', onResize)
+  window.removeEventListener('mouseup', stopResize)
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   await initStore()
@@ -63,6 +94,8 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   unlistenClose?.()
+  window.removeEventListener('mousemove', onResize)
+  window.removeEventListener('mouseup', stopResize)
 })
 </script>
 
@@ -70,11 +103,18 @@ onUnmounted(() => {
   <div class="app-shell">
     <SideNav />
 
-    <main class="main-col">
+    <main class="main-col" :style="{ width: `${listWidth}px` }">
       <TodoList v-if="ui.view === 'todo'" />
       <NoteList v-else-if="ui.view === 'note'" />
       <TestView v-else />
     </main>
+
+    <div
+      class="list-resizer"
+      :class="{ active: resizing }"
+      title="拖拽调整列表宽度"
+      @mousedown.prevent="startResize"
+    />
 
     <Transition name="detail" mode="out-in">
       <DetailPanel
@@ -108,12 +148,24 @@ onUnmounted(() => {
 }
 
 .main-col {
-  width: 300px;
   flex-shrink: 0;
   background: var(--bg-list);
   border-right: 1px solid var(--border-light);
-  min-width: 260px;
-  max-width: 340px;
+}
+
+/* 列表 / 编辑区分隔拖拽条 */
+.list-resizer {
+  width: 5px;
+  margin: 0 -2px;
+  cursor: col-resize;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+  transition: background 0.15s ease;
+}
+.list-resizer:hover,
+.list-resizer.active {
+  background: var(--accent-soft);
 }
 
 .toast {

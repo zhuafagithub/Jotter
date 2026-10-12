@@ -1,19 +1,18 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends string">
 import { computed, ref } from 'vue'
 import { Check, ChevronDown } from 'lucide-vue-next'
-import type { TodoSort } from '../types'
 
 const props = defineProps<{
-  modelValue: TodoSort
-  options: { value: TodoSort; label: string }[]
+  modelValue: T
+  options: { value: T; label: string }[]
 }>()
 
-const emit = defineEmits<{ (e: 'update:modelValue', v: TodoSort): void }>()
+const emit = defineEmits<{ (e: 'update:modelValue', v: T): void }>()
 
 const open = ref(false)
 const current = computed(() => props.options.find((o) => o.value === props.modelValue))
 
-function pick(value: TodoSort): void {
+function pick(value: T): void {
   emit('update:modelValue', value)
   open.value = false
 }
@@ -99,6 +98,7 @@ function pick(value: TodoSort): void {
   border-radius: 6px;
   font-size: 13px;
   color: var(--text);
+  white-space: nowrap;
   transition: background 0.15s ease;
 }
 .menu-item:hover {

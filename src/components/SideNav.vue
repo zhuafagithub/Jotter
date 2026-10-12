@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 import {
   ExternalLink,
@@ -50,6 +51,18 @@ function onDocMousedown(e: MouseEvent): void {
 onMounted(() => window.addEventListener('mousedown', onDocMousedown, true))
 onBeforeUnmount(() => window.removeEventListener('mousedown', onDocMousedown, true))
 
+/** 侧边栏空白区域按住左键拖动窗口（按钮、logo、设置面板等交互元素除外） */
+async function onNavMousedown(e: MouseEvent): Promise<void> {
+  if (e.button !== 0) return
+  const target = e.target as HTMLElement
+  if (target.closest('button, .brand, .nav-group, .nav-bottom, .settings-panel')) return
+  try {
+    await getCurrentWindow().startDragging()
+  } catch {
+    /* 忽略：无权限时静默 */
+  }
+}
+
 function openGithub(): void {
   void openUrl(GITHUB_URL)
 }
@@ -75,7 +88,7 @@ async function openDataFolder(): Promise<void> {
 </script>
 
 <template>
-  <aside class="side-nav">
+  <aside class="side-nav" @mousedown="onNavMousedown">
     <div class="brand" data-tip="小记/Jotter">
       <div class="logo">
         <AppLogo variant="white" :size="20" />

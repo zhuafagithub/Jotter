@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   Check,
   ChevronDown,
   CircleCheck,
+  GripVertical,
   Plus,
   Trash2,
 } from 'lucide-vue-next'
@@ -33,6 +34,7 @@ interface Group {
 
 const sortOptions: { value: TodoSort; label: string }[] = [
   { value: 'smart', label: '智能分组' },
+  { value: 'custom', label: '自定义' },
   { value: 'due', label: '按时间' },
   { value: 'created', label: '按创建' },
   { value: 'status', label: '按状态' },
@@ -61,6 +63,37 @@ const pendingCount = computed(() =>
 
 const statusOrder: Record<TodoStatus, number> = { pending: 0, active: 1, done: 2 }
 
+/** 自定义顺序：order 小者在前，未编号的排在已编号之后 */
+const orderCmp = (a: TodoItem, b: TodoItem): number =>
+  (a.order ?? Number.POSITIVE_INFINITY) - (b.order ?? Number.POSITIVE_INFINITY) ||
+  b.updatedAt - a.updatedAt
+
+/** 按当前排序模式比较 */
+function cmpBy(a: TodoItem, b: TodoItem): number {
+  switch (ui.todoSort) {
+    case 'custom':
+      return orderCmp(a, b)
+    case 'due':
+      return (a.dueAt ?? Number.POSITIVE_INFINITY) - (b.dueAt ?? Number.POSITIVE_INFINITY)
+    case 'created':
+      return b.createdAt - a.createdAt
+    case 'status':
+      return statusOrder[a.status] - statusOrder[b.status] || b.updatedAt - a.updatedAt
+    default:
+      return (
+        (a.dueAt ?? Number.POSITIVE_INFINITY) - (b.dueAt ?? Number.POSITIVE_INFINITY) ||
+        b.updatedAt - a.updatedAt
+      )
+  }
+}
+
+function sortList(list: TodoItem[]): TodoItem[] {
+  return [...list].sort(cmpBy)
+}
+
+/** 自定义模式保留智能分组结构，仅组内顺序手动化 */
+const useGroups = computed(() => ui.todoSort === 'smart' || ui.todoSort === 'custom')
+
 /** 分组 + 排序 */
 const groups = computed<Group[]>(() => {
   if (searchHits.value) {
@@ -68,25 +101,8 @@ const groups = computed<Group[]>(() => {
   }
   const source = scoped.value
 
-  const sortBy = (a: TodoItem, b: TodoItem): number => {
-    switch (ui.todoSort) {
-      case 'due':
-        return (a.dueAt ?? Number.POSITIVE_INFINITY) - (b.dueAt ?? Number.POSITIVE_INFINITY)
-      case 'created':
-        return b.createdAt - a.createdAt
-      case 'status':
-        return statusOrder[a.status] - statusOrder[b.status] || b.updatedAt - a.updatedAt
-      default:
-        return (
-          (a.dueAt ?? Number.POSITIVE_INFINITY) - (b.dueAt ?? Number.POSITIVE_INFINITY) ||
-          b.updatedAt - a.updatedAt
-        )
-    }
-  }
-  const sortList2 = (list: TodoItem[]) => [...list].sort(sortBy)
-
-  if (ui.todoSort !== 'smart') {
-    return [{ key: 'all', label: '', items: sortList2(source) }]
+  if (!useGroups.value) {
+    return [{ key: 'all', label: '', items: sortList(source) }]
   }
 
   const now = new Date()
@@ -102,35 +118,89 @@ const groups = computed<Group[]>(() => {
     {
       key: 'today',
       label: '今天',
-      items: sortList2(source.filter((t) => open(t) && hasDue(t) && t.dueAt < tomorrowStart)),
+      items: sortList(source.filter((t) => open(t) && hasDue(t) && t.dueAt < tomorrowStart)),
     },
     {
       key: 'week',
       label: '本周',
-      items: sortList2(
+      items: sortList(
         source.filter((t) => open(t) && hasDue(t) && t.dueAt >= tomorrowStart && t.dueAt < weekEnd),
       ),
     },
     {
       key: 'later',
       label: '以后',
-      items: sortList2(source.filter((t) => open(t) && hasDue(t) && t.dueAt >= weekEnd)),
+      items: sortList(source.filter((t) => open(t) && hasDue(t) && t.dueAt >= weekEnd)),
     },
     {
       key: 'someday',
       label: '无日期',
-      items: sortList2(source.filter((t) => open(t) && t.dueAt == null)),
+      items: sortList(source.filter((t) => open(t) && t.dueAt == null)),
     },
-    { key: 'done', label: '已完成', items: sortList2(source.filter((t) => t.status === 'done')) },
+    { key: 'done', label: '已完成', items: sortList(source.filter((t) => t.status === 'done')) },
   ]
 })
 
-function sortList(list: TodoItem[]): TodoItem[] {
-  return [...list].sort(
-    (a, b) =>
-      (a.dueAt ?? Number.POSITIVE_INFINITY) - (b.dueAt ?? Number.POSITIVE_INFINITY) ||
-      b.updatedAt - a.updatedAt,
-  )
+// ---------- 组内拖拽排序 ----------
+const dragId = ref<string | null>(null)
+const dragOverId = ref<string | null>(null)
+const dropBefore = ref(false)
+
+function onDragStart(e: DragEvent, todo: TodoItem): void {
+  if (keyword.value) {
+    e.preventDefault() // 搜索结果不参与拖拽
+    return
+  }
+  dragId.value = todo.id
+  e.dataTransfer?.setData('text/plain', todo.id)
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    // 拖拽视觉跟随整条卡片而非小手柄
+    const itemEl = (e.currentTarget as HTMLElement).closest('.item')
+    if (itemEl) e.dataTransfer.setDragImage(itemEl, 24, 24)
+  }
+}
+
+function onDragOver(e: DragEvent, todo: TodoItem): void {
+  if (!dragId.value || dragId.value === todo.id) return
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  dropBefore.value = e.clientY < rect.top + rect.height / 2
+  dragOverId.value = todo.id
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+}
+
+function onDragLeave(todo: TodoItem): void {
+  if (dragOverId.value === todo.id) dragOverId.value = null
+}
+
+/** 落下：组内重排并把顺序写入 order（非自定义模式自动切换） */
+function onDrop(e: DragEvent, group: Group, todo: TodoItem): void {
+  e.preventDefault()
+  const drag = dragId.value
+  dragId.value = null
+  dragOverId.value = null
+  if (!drag || drag === todo.id) return
+  const ids = group.items.map((t) => t.id)
+  const fromIdx = ids.indexOf(drag)
+  if (fromIdx === -1) return
+  ids.splice(fromIdx, 1)
+  let toIdx = ids.indexOf(todo.id)
+  if (!dropBefore.value) toIdx += 1
+  ids.splice(toIdx, 0, drag)
+  ids.forEach((id, i) => {
+    const t = store.todos.find((x) => x.id === id)
+    if (t) t.order = i
+  })
+  if (ui.todoSort !== 'custom') {
+    setTodoSort('custom')
+    showToast('已切换为自定义排序')
+  }
+}
+
+function onDragEnd(): void {
+  dragId.value = null
+  dragOverId.value = null
 }
 
 /** 三态循环：未开始 -> 进行中 -> 已完成 -> 未开始 */
@@ -150,8 +220,9 @@ function onDelete(todo: TodoItem): void {
 
 onMounted(() => {
   registerFirstProvider('todo', () => {
-    const list = searchHits.value ?? sortList(scoped.value)
-    return list[0]?.id ?? null
+    if (searchHits.value) return sortList(searchHits.value)[0]?.id ?? null
+    // 按分组顺序取第一个非空分组的头一项（今天 > 本周 > 以后 > 无日期 > 已完成）
+    return groups.value.find((g) => g.items.length > 0)?.items[0]?.id ?? null
   })
 })
 </script>
@@ -174,7 +245,7 @@ onMounted(() => {
     <SearchBox v-model="ui.searchTodo" placeholder="搜索待办标题与内容…" />
     <FolderBar kind="todo" />
 
-    <div class="list-scroll">
+    <div class="list-scroll" @dragover.prevent @drop.prevent>
       <template v-for="group in groups" :key="group.key">
         <button
           v-if="group.label && group.items.length"
@@ -193,9 +264,25 @@ onMounted(() => {
             :class="{
               selected: ui.selectedType === 'todo' && ui.selectedId === todo.id,
               done: todo.status === 'done',
+              dragging: dragId === todo.id,
+              'drop-before': dragOverId === todo.id && dropBefore,
+              'drop-after': dragOverId === todo.id && !dropBefore,
             }"
             @click="select('todo', todo.id)"
+            @dragover="onDragOver($event, todo)"
+            @dragleave="onDragLeave(todo)"
+            @drop="onDrop($event, group, todo)"
           >
+            <button
+              class="drag-handle"
+              data-tip="按住拖动排序"
+              data-tip-dir="top"
+              :draggable="!keyword"
+              @dragstart="onDragStart($event, todo)"
+              @dragend="onDragEnd"
+            >
+              <GripVertical :size="14" />
+            </button>
             <button
               class="checkbox"
               :class="todo.status"
@@ -341,6 +428,53 @@ onMounted(() => {
 }
 .item.selected {
   background: var(--selected);
+}
+
+/* 拖拽指示线与拖拽中的半透明态 */
+.item.dragging {
+  opacity: 0.4;
+}
+/* 左侧拖拽手柄：悬停整条时显现 */
+.drag-handle {
+  width: 16px;
+  height: 26px;
+  margin-right: 2px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-placeholder);
+  cursor: grab;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.item:hover .drag-handle {
+  opacity: 1;
+}
+.drag-handle:hover {
+  color: var(--text-secondary);
+}
+.item.drop-before::before,
+.item.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  z-index: 1;
+}
+.item.drop-before::before {
+  top: -1px;
+}
+.item.drop-after::after {
+  bottom: -1px;
 }
 
 .item-body {

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Extension } from '@tiptap/core'
+import { Extension, getMarkRange } from '@tiptap/core'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
-import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import CodeBlock from '@tiptap/extension-code-block'
@@ -258,6 +258,135 @@ onBeforeUnmount(() => {
   if (findTimer) clearTimeout(findTimer)
 })
 
+// ---------- 图片大图预览 ----------
+const previewSrc = ref('')
+
+function closePreview(): void {
+  previewSrc.value = ''
+}
+
+function onPreviewKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') closePreview()
+}
+
+watch(previewSrc, (value) => {
+  if (value) window.addEventListener('keydown', onPreviewKeydown)
+  else window.removeEventListener('keydown', onPreviewKeydown)
+})
+
+// ---------- 超链接右键菜单（重命名 / 改网址 / 打开 / 移除） ----------
+interface LinkMenuInfo {
+  from: number
+  to: number
+  href: string
+  text: string
+}
+const linkMenuOpen = ref(false)
+const linkMenuX = ref(0)
+const linkMenuY = ref(0)
+const linkMenu = ref<LinkMenuInfo | null>(null)
+const linkMenuMode = ref<'menu' | 'rename' | 'url'>('menu')
+const linkEditText = ref('')
+const linkEditUrl = ref('')
+const linkEditInput = ref<HTMLInputElement | null>(null)
+
+function openLinkMenu(view: EditorView, anchor: HTMLElement, x: number, y: number): void {
+  const pos = view.posAtDOM(anchor, 0)
+  const $pos = view.state.doc.resolve(pos)
+  const range = getMarkRange($pos, view.state.schema.marks.link)
+  if (!range) return
+  const node = view.state.doc.nodeAt(range.from)
+  const href = (node?.marks.find((m) => m.type.name === 'link')?.attrs.href as string) ?? ''
+  linkMenu.value = {
+    from: range.from,
+    to: range.to,
+    href,
+    text: view.state.doc.textBetween(range.from, range.to, ' '),
+  }
+  linkMenuX.value = Math.min(x, window.innerWidth - 220)
+  linkMenuY.value = Math.min(y, window.innerHeight - 200)
+  linkMenuMode.value = 'menu'
+  linkMenuOpen.value = true
+}
+
+function onLinkMenuKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') linkMenuOpen.value = false
+}
+
+watch(linkMenuOpen, (open) => {
+  if (open) window.addEventListener('keydown', onLinkMenuKeydown)
+  else window.removeEventListener('keydown', onLinkMenuKeydown)
+})
+
+watch(linkMenuMode, (mode) => {
+  if (mode !== 'menu') {
+    setTimeout(() => linkEditInput.value?.focus(), 20)
+  }
+})
+
+function startLinkRename(): void {
+  linkEditText.value = linkMenu.value?.text ?? ''
+  linkMenuMode.value = 'rename'
+}
+
+function startLinkUrlEdit(): void {
+  linkEditUrl.value = linkMenu.value?.href ?? 'https://'
+  linkMenuMode.value = 'url'
+}
+
+function openLinkExternal(): void {
+  const href = linkMenu.value?.href
+  linkMenuOpen.value = false
+  if (href) void openUrl(href)
+}
+
+/** 重命名：替换链接文本并保留链接标记 */
+function applyLinkRename(): void {
+  const ed = editor.value
+  const info = linkMenu.value
+  linkMenuOpen.value = false
+  if (!ed || !info) return
+  const text = linkEditText.value.trim()
+  if (!text || text === info.text) return
+  const { state } = ed
+  const node = state.doc.nodeAt(info.from)
+  const linkMark = node?.marks.find((m) => m.type.name === 'link')
+  const tr = state.tr.replaceWith(
+    info.from,
+    info.to,
+    state.schema.text(text, linkMark ? [linkMark] : []),
+  )
+  ed.view.dispatch(tr.scrollIntoView())
+}
+
+/** 修改网址：替换区间上的 link 标记属性 */
+function applyLinkUrl(): void {
+  const ed = editor.value
+  const info = linkMenu.value
+  linkMenuOpen.value = false
+  if (!ed || !info) return
+  const url = linkEditUrl.value.trim()
+  if (!url) return
+  const { state } = ed
+  const linkType = state.schema.marks.link
+  const tr = state.tr.removeMark(info.from, info.to, linkType)
+  tr.addMark(info.from, info.to, linkType.create({ href: url }))
+  ed.view.dispatch(tr)
+}
+
+function removeLinkMark(): void {
+  const ed = editor.value
+  const info = linkMenu.value
+  linkMenuOpen.value = false
+  if (!ed || !info) return
+  ed.view.dispatch(ed.state.tr.removeMark(info.from, info.to, ed.state.schema.marks.link))
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onPreviewKeydown)
+  window.removeEventListener('keydown', onLinkMenuKeydown)
+})
+
 const editor = useEditor({
   content: props.modelValue || '',
   extensions: [
@@ -346,12 +475,32 @@ const editor = useEditor({
       void insertImageFiles(files)
       return true
     },
+    handleDOMEvents: {
+      // 右键超链接：弹出重命名 / 改网址 / 打开 / 移除菜单
+      contextmenu: (view, event) => {
+        const target = event.target as HTMLElement | null
+        const anchor = target?.closest?.('a')
+        if (!anchor) return false
+        event.preventDefault()
+        openLinkMenu(view, anchor, event.clientX, event.clientY)
+        return true
+      },
+    },
     handleClick: (view, _pos, event) => {
       const target = event.target as HTMLElement
+      // 点击图片：大图预览
+      if (target instanceof HTMLImageElement) {
+        previewSrc.value = target.getAttribute('src') ?? ''
+        return true
+      }
       const anchor = target.closest('a')
       if (anchor?.href) {
-        void openUrl(anchor.href)
-        return true
+        // Ctrl/⌘ + 点击才跳转；普通点击仅定位光标，不干扰编辑
+        if (event.ctrlKey || event.metaKey) {
+          void openUrl(anchor.href)
+          return true
+        }
+        return false
       }
       // 文档末尾是代码块时，点击代码块下方区域自动补一个段落，让光标可定位继续输入
       const { state } = view
@@ -756,6 +905,58 @@ defineExpose({ copyPlain, copyRich })
     </div>
 
     <editor-content :editor="editor" class="editor-body" @click="onBodyClick" />
+
+    <!-- 图片大图预览 -->
+    <Transition name="pop">
+      <div v-if="previewSrc" class="img-lightbox" @click="closePreview">
+        <img :src="previewSrc" alt="图片预览" @click.stop />
+        <button class="lightbox-close" data-tip="关闭 (Esc)" data-tip-dir="left" @click="closePreview">
+          <X :size="18" />
+        </button>
+      </div>
+    </Transition>
+
+    <!-- 超链接右键菜单 -->
+    <div v-if="linkMenuOpen" class="link-menu-mask" @click="linkMenuOpen = false" @contextmenu.prevent="linkMenuOpen = false" />
+    <Transition name="pop">
+      <div
+        v-if="linkMenuOpen && linkMenu"
+        class="link-menu"
+        :class="{ editing: linkMenuMode !== 'menu' }"
+        :style="{ left: `${linkMenuX}px`, top: `${linkMenuY}px` }"
+      >
+        <template v-if="linkMenuMode === 'menu'">
+          <button class="lm-item" @click="openLinkExternal">打开链接</button>
+          <button class="lm-item" @click="startLinkRename">重命名</button>
+          <button class="lm-item" @click="startLinkUrlEdit">修改网址</button>
+          <button class="lm-item danger" @click="removeLinkMark">移除链接</button>
+        </template>
+        <template v-else-if="linkMenuMode === 'rename'">
+          <input
+            ref="linkEditInput"
+            v-model="linkEditText"
+            class="link-input"
+            type="text"
+            placeholder="输入新的显示文字，回车确认"
+            @keydown.enter.prevent="applyLinkRename"
+            @keydown.esc.stop="linkMenuOpen = false"
+          />
+          <button class="tool-btn confirm" @click="applyLinkRename"><Check :size="15" /></button>
+        </template>
+        <template v-else>
+          <input
+            ref="linkEditInput"
+            v-model="linkEditUrl"
+            class="link-input"
+            type="text"
+            placeholder="输入新网址，回车确认"
+            @keydown.enter.prevent="applyLinkUrl"
+            @keydown.esc.stop="linkMenuOpen = false"
+          />
+          <button class="tool-btn confirm" @click="applyLinkUrl"><Check :size="15" /></button>
+        </template>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -1030,5 +1231,88 @@ defineExpose({ copyPlain, copyRich })
   min-height: 0;
   overflow-y: auto;
   padding: 16px 4px 48px;
+}
+
+/* ---------- 图片大图预览 ---------- */
+.img-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.img-lightbox img {
+  max-width: 92vw;
+  max-height: 90vh;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+.lightbox-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* ---------- 超链接右键菜单 ---------- */
+.link-menu-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+}
+.link-menu {
+  position: fixed;
+  z-index: 46;
+  min-width: 140px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  padding: 4px;
+}
+.link-menu.editing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  min-width: 240px;
+}
+.lm-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.lm-item:hover {
+  background: var(--hover);
+}
+.lm-item.danger:hover {
+  background: rgba(255, 77, 79, 0.08);
+  color: var(--red);
+}
+.link-menu .link-input {
+  flex: 1;
+  min-width: 160px;
 }
 </style>

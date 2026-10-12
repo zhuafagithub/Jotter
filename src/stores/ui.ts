@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { TodoSort, ViewKind } from '../types'
+import type { NoteSort, TodoSort, ViewKind } from '../types'
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -21,6 +21,7 @@ const collapsedFallback: Record<'todo', string[]> = { todo: ['done'] }
 export const ui = reactive({
   view: load<ViewKind>('ui.view', 'todo'),
   todoSort: load<TodoSort>('ui.todoSort', 'smart'),
+  noteSort: load<NoteSort>('ui.noteSort', 'updated'),
   selectedType: null as 'todo' | 'note' | null,
   selectedId: null as string | null,
   folderTodo: load<string | null>('ui.folderTodo', null),
@@ -44,6 +45,11 @@ export function setView(view: ViewKind): void {
 export function setTodoSort(sort: TodoSort): void {
   ui.todoSort = sort
   localStorage.setItem('ui.todoSort', JSON.stringify(sort))
+}
+
+export function setNoteSort(sort: NoteSort): void {
+  ui.noteSort = sort
+  localStorage.setItem('ui.noteSort', JSON.stringify(sort))
 }
 
 export function select(type: 'todo' | 'note', id: string): void {

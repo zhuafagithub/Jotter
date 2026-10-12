@@ -66,6 +66,20 @@ fn data_path(app: tauri::AppHandle) -> Result<String, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 单实例：重复启动时聚焦已有窗口，避免多开（多个窗口 / 重复托盘图标）
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app);
+        }))
+        // 记忆窗口大小与位置（退出时保存，启动时恢复）
+        // 不恢复 VISIBLE：本应用关闭窗口是隐藏到托盘，若把隐藏态存下来会导致下次启动不显示
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![load_data, save_data, data_path])
         .setup(|app| {

@@ -12,6 +12,8 @@ export interface TodoItem {
   folderId: string | null
   /** 截止 / 提醒时间（毫秒时间戳），null 表示未设置 */
   dueAt: number | null
+  /** 自定义排序序号（拖拽排序用，越小越靠前） */
+  order: number | null
   createdAt: number
   updatedAt: number
 }
@@ -22,6 +24,8 @@ export interface NoteItem {
   title: string
   content: string
   folderId: string | null
+  /** 自定义排序序号（拖拽排序用，越小越靠前） */
+  order: number | null
   createdAt: number
   updatedAt: number
 }
@@ -44,5 +48,8 @@ export interface AppData {
 /** 左侧导航视图 */
 export type ViewKind = 'todo' | 'note' | 'test'
 
-/** 待办排序方式：智能分组 / 按时间 / 按创建 / 按状态 */
-export type TodoSort = 'smart' | 'due' | 'created' | 'status'
+/** 待办排序方式：智能分组 / 按时间 / 按创建 / 按状态 / 自定义（分组保留、组内手动顺序） */
+export type TodoSort = 'smart' | 'due' | 'created' | 'status' | 'custom'
+
+/** 笔记排序方式：按修改时间 / 按创建时间 / 自定义（手动拖拽顺序） */
+export type NoteSort = 'updated' | 'created' | 'custom'
