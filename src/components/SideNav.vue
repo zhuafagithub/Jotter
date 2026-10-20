@@ -20,7 +20,7 @@ import AppLogo from './AppLogo.vue'
 
 const { theme, toggleTheme } = useTheme()
 
-const version = '0.1.1'
+const version = '0.1.2'
 const GITHUB_URL = 'https://github.com/zhuafagithub/Jotter'
 const showSettings = ref(false)
 const dataPath = ref('')

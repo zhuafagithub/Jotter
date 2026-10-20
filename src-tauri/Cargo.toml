@@ -1,6 +1,6 @@
 [package]
 name = "jotter"
-version = "0.1.1"
+version = "0.1.2"
 description = "小记 Jotter - 本地待办与笔记"
 authors = ["zhuafa"]
 edition = "2024"
