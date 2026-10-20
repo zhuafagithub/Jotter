@@ -24,6 +24,8 @@ export const ui = reactive({
   noteSort: load<NoteSort>('ui.noteSort', 'updated'),
   selectedType: null as 'todo' | 'note' | null,
   selectedId: null as string | null,
+  /** 颜文字当前选中分类 id；'favorite' 为内置「常用」 */
+  kaomojiCategoryId: load<string>('ui.kaomojiCategoryId', 'favorite'),
   folderTodo: load<string | null>('ui.folderTodo', null),
   folderNote: load<string | null>('ui.folderNote', null),
   searchTodo: '',
@@ -40,6 +42,11 @@ export function setView(view: ViewKind): void {
   }
   if (ui.selectedType !== view) clearSelection()
   selectFirstOfView(view)
+}
+
+export function selectKaomojiCategory(id: string): void {
+  ui.kaomojiCategoryId = id
+  localStorage.setItem('ui.kaomojiCategoryId', id)
 }
 
 export function setTodoSort(sort: TodoSort): void {

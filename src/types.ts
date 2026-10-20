@@ -38,15 +38,34 @@ export interface Folder {
   createdAt: number
 }
 
+/** 颜文字分类 */
+export interface KaomojiCategory {
+  id: string
+  name: string
+  createdAt: number
+}
+
+/** 颜文字条目 */
+export interface KaomojiItem {
+  id: string
+  content: string
+  categoryId: string
+  /** 复制使用次数，用于「常用」排序 */
+  useCount: number
+  createdAt: number
+}
+
 /** 本地持久化的完整数据结构（data.json） */
 export interface AppData {
   todos: TodoItem[]
   notes: NoteItem[]
   folders: Folder[]
+  kaomojiCategories: KaomojiCategory[]
+  kaomojiItems: KaomojiItem[]
 }
 
 /** 左侧导航视图 */
-export type ViewKind = 'todo' | 'note' | 'test'
+export type ViewKind = 'todo' | 'note' | 'kaomoji' | 'test'
 
 /** 待办排序方式：智能分组 / 按时间 / 按创建 / 按状态 / 自定义（分组保留、组内手动顺序） */
 export type TodoSort = 'smart' | 'due' | 'created' | 'status' | 'custom'

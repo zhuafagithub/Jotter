@@ -11,6 +11,7 @@ import {
   Moon,
   NotebookPen,
   Settings,
+  Smile,
   Sun,
 } from 'lucide-vue-next'
 import { setView, ui } from '../stores/ui'
@@ -19,7 +20,7 @@ import AppLogo from './AppLogo.vue'
 
 const { theme, toggleTheme } = useTheme()
 
-const version = '0.1.0'
+const version = '0.1.1'
 const GITHUB_URL = 'https://github.com/zhuafagithub/Jotter'
 const showSettings = ref(false)
 const dataPath = ref('')
@@ -27,6 +28,7 @@ const dataPath = ref('')
 const navItems = [
   { key: 'todo' as const, icon: ListTodo, tip: '待办' },
   { key: 'note' as const, icon: NotebookPen, tip: '笔记' },
+  { key: 'kaomoji' as const, icon: Smile, tip: '颜文字' },
   { key: 'test' as const, icon: FlaskConical, tip: '测试功能' },
 ]
 
