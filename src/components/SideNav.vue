@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { getVersion } from '@tauri-apps/api/app'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 import {
@@ -10,17 +12,19 @@ import {
   ListTodo,
   Moon,
   NotebookPen,
+  Pin,
+  RefreshCw,
   Settings,
-  Smile,
   Sun,
 } from 'lucide-vue-next'
 import { setView, ui } from '../stores/ui'
+import { flushSave } from '../stores/data'
 import { useTheme } from '../composables/useTheme'
 import AppLogo from './AppLogo.vue'
 
 const { theme, toggleTheme } = useTheme()
 
-const version = '0.1.2'
+const version = ref('')
 const GITHUB_URL = 'https://github.com/zhuafagithub/Jotter'
 const showSettings = ref(false)
 const dataPath = ref('')
@@ -28,9 +32,116 @@ const dataPath = ref('')
 const navItems = [
   { key: 'todo' as const, icon: ListTodo, tip: '待办' },
   { key: 'note' as const, icon: NotebookPen, tip: '笔记' },
-  { key: 'kaomoji' as const, icon: Smile, tip: '颜文字' },
   { key: 'test' as const, icon: FlaskConical, tip: '测试功能' },
 ]
+
+// ---------- 窗口置顶 ----------
+const pinned = ref(localStorage.getItem('ui.alwaysOnTop') === '1')
+
+async function togglePin(): Promise<void> {
+  pinned.value = !pinned.value
+  localStorage.setItem('ui.alwaysOnTop', pinned.value ? '1' : '0')
+  try {
+    await getCurrentWindow().setAlwaysOnTop(pinned.value)
+  } catch {
+    /* 忽略：无权限时静默 */
+  }
+}
+
+// ---------- 联网检查更新 ----------
+interface ReleaseInfo {
+  version: string
+  notes: string
+  url: string
+  size: number
+  page_url: string
+}
+interface UpdateProgress {
+  downloaded: number
+  total: number
+}
+
+type UpdateState = 'idle' | 'checking' | 'latest' | 'available' | 'downloading' | 'downloaded' | 'error'
+
+const updateState = ref<UpdateState>('idle')
+const updateMsg = ref('')
+const newVersion = ref('')
+const updateNotes = ref('')
+const downloadUrl = ref('')
+const downloadPath = ref('')
+const progress = ref(0)
+let unlistenProgress: (() => void) | null = null
+
+/** 语义化版本比较：返回 1 表示 a > b，-1 表示 a < b */
+function compareVersion(a: string, b: string): number {
+  const pa = a.replace(/^v/i, '').split(/[.+-]/).map((v) => Number(v) || 0)
+  const pb = b.replace(/^v/i, '').split(/[.+-]/).map((v) => Number(v) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0
+    const y = pb[i] ?? 0
+    if (x !== y) return x > y ? 1 : -1
+  }
+  return 0
+}
+
+async function checkUpdate(): Promise<void> {
+  if (updateState.value === 'checking' || updateState.value === 'downloading') return
+  updateState.value = 'checking'
+  updateMsg.value = ''
+  try {
+    const info = await invoke<ReleaseInfo>('check_update')
+    if (compareVersion(info.version, version.value) > 0) {
+      newVersion.value = info.version
+      updateNotes.value = info.notes.trim()
+      downloadUrl.value = info.url
+      updateState.value = 'available'
+    } else {
+      updateState.value = 'latest'
+      updateMsg.value = '已是最新版本'
+    }
+  } catch (err) {
+    updateState.value = 'error'
+    updateMsg.value = String(err)
+  }
+}
+
+async function startDownload(): Promise<void> {
+  if (updateState.value === 'downloading' || !downloadUrl.value) return
+  updateState.value = 'downloading'
+  progress.value = 0
+  unlistenProgress?.()
+  unlistenProgress = await listen<UpdateProgress>('update-progress', (event) => {
+    const { downloaded, total } = event.payload
+    progress.value = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0
+  })
+  try {
+    downloadPath.value = await invoke<string>('download_update', {
+      url: downloadUrl.value,
+      version: newVersion.value,
+    })
+    progress.value = 100
+    updateState.value = 'downloaded'
+  } catch (err) {
+    updateState.value = 'error'
+    updateMsg.value = `下载失败：${String(err)}`
+  } finally {
+    unlistenProgress?.()
+    unlistenProgress = null
+  }
+}
+
+/** 启动安装程序后退出当前应用，由安装包完成覆盖升级 */
+async function installUpdate(): Promise<void> {
+  if (!downloadPath.value) return
+  updateMsg.value = '正在启动安装程序…'
+  try {
+    await flushSave()
+    await invoke('install_update', { path: downloadPath.value })
+  } catch (err) {
+    updateState.value = 'error'
+    updateMsg.value = `安装失败：${String(err)}`
+  }
+}
 
 async function toggleSettings(): Promise<void> {
   showSettings.value = !showSettings.value
@@ -41,6 +152,7 @@ async function toggleSettings(): Promise<void> {
       dataPath.value = ''
     }
   }
+  if (showSettings.value && updateState.value === 'idle') void checkUpdate()
 }
 
 /** 点击面板外部任意区域时关闭设置弹层 */
@@ -50,8 +162,27 @@ function onDocMousedown(e: MouseEvent): void {
   if (!target.closest('.settings-wrap')) showSettings.value = false
 }
 
-onMounted(() => window.addEventListener('mousedown', onDocMousedown, true))
-onBeforeUnmount(() => window.removeEventListener('mousedown', onDocMousedown, true))
+onMounted(async () => {
+  window.addEventListener('mousedown', onDocMousedown, true)
+  try {
+    version.value = await getVersion()
+  } catch {
+    version.value = ''
+  }
+  // 恢复上次的置顶状态
+  if (pinned.value) {
+    try {
+      await getCurrentWindow().setAlwaysOnTop(true)
+    } catch {
+      /* 忽略：无权限时静默 */
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('mousedown', onDocMousedown, true)
+  unlistenProgress?.()
+})
 
 /** 侧边栏空白区域按住左键拖动窗口（按钮、logo、设置面板等交互元素除外） */
 async function onNavMousedown(e: MouseEvent): Promise<void> {
@@ -113,6 +244,17 @@ async function openDataFolder(): Promise<void> {
     </nav>
 
     <div class="nav-bottom">
+      <button
+        class="nav-btn"
+        :class="{ active: pinned }"
+        :data-tip="pinned ? '取消窗口置顶' : '窗口置顶'"
+        data-tip-dir="left"
+        @click="togglePin"
+      >
+        <Pin :size="20" />
+        <span v-if="pinned" class="indicator" />
+      </button>
+
       <div class="settings-wrap">
         <button
           class="nav-btn"
@@ -126,7 +268,41 @@ async function openDataFolder(): Promise<void> {
         <Transition name="pop">
           <div v-if="showSettings" class="settings-panel">
             <div class="settings-name">小记 Jotter</div>
-            <div class="settings-ver">版本 v{{ version }}</div>
+            <div class="settings-ver-row">
+              <span class="settings-ver">版本 v{{ version || '…' }}</span>
+              <button
+                class="check-btn"
+                :disabled="updateState === 'checking' || updateState === 'downloading'"
+                @click="checkUpdate"
+              >
+                <RefreshCw :size="11" :class="{ spin: updateState === 'checking' }" />
+                {{ updateState === 'checking' ? '检查中…' : '检查更新' }}
+              </button>
+            </div>
+
+            <div v-if="updateState === 'latest'" class="upd-msg ok">已是最新版本</div>
+            <div v-else-if="updateState === 'error'" class="upd-msg err">{{ updateMsg }}</div>
+
+            <div v-else-if="updateState === 'available'" class="upd-box">
+              <div class="upd-title">发现新版本 v{{ newVersion }}</div>
+              <div v-if="updateNotes" class="upd-notes">{{ updateNotes }}</div>
+              <div class="upd-actions">
+                <button class="upd-btn primary" @click="startDownload">立即更新</button>
+                <button class="upd-btn" @click="openGithub">查看详情</button>
+              </div>
+            </div>
+
+            <div v-else-if="updateState === 'downloading'" class="upd-box">
+              <div class="upd-title">正在下载 v{{ newVersion }}… {{ progress }}%</div>
+              <div class="upd-bar"><div class="upd-bar-in" :style="{ width: `${progress}%` }" /></div>
+            </div>
+
+            <div v-else-if="updateState === 'downloaded'" class="upd-box">
+              <div class="upd-title">v{{ newVersion }} 下载完成</div>
+              <div class="upd-actions">
+                <button class="upd-btn primary" @click="installUpdate">安装并重启</button>
+              </div>
+            </div>
 
             <div class="settings-divider" />
 
@@ -282,10 +458,135 @@ async function openDataFolder(): Promise<void> {
   letter-spacing: 0.2px;
   line-height: 1.3;
 }
+.settings-ver-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
 .settings-ver {
   font-size: 11.5px;
   color: var(--text-secondary);
-  margin-top: 2px;
+}
+
+.check-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+.check-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.check-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.upd-msg {
+  font-size: 11.5px;
+  padding: 4px 0 0;
+  word-break: break-word;
+}
+.upd-msg.ok {
+  color: var(--accent);
+}
+.upd-msg.err {
+  color: #d9534f;
+}
+
+.upd-box {
+  margin-top: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-list);
+}
+
+.upd-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.upd-notes {
+  margin-top: 5px;
+  max-height: 84px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.upd-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.upd-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+.upd-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.upd-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.upd-btn.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #fff;
+}
+
+.upd-bar {
+  margin-top: 7px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-light);
+  overflow: hidden;
+}
+.upd-bar-in {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.2s ease;
 }
 
 .settings-divider {

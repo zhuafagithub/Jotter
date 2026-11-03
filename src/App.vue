@@ -16,8 +16,6 @@ import { useTheme } from './composables/useTheme'
 import SideNav from './components/SideNav.vue'
 import TodoList from './components/TodoList.vue'
 import NoteList from './components/NoteList.vue'
-import KaomojiList from './components/KaomojiList.vue'
-import KaomojiGrid from './components/KaomojiGrid.vue'
 import TestView from './components/TestView.vue'
 import DetailPanel from './components/DetailPanel.vue'
 
@@ -108,7 +106,6 @@ onUnmounted(() => {
     <main class="main-col" :style="{ width: `${listWidth}px` }">
       <TodoList v-if="ui.view === 'todo'" />
       <NoteList v-else-if="ui.view === 'note'" />
-      <KaomojiList v-else-if="ui.view === 'kaomoji'" />
       <TestView v-else />
     </main>
 
@@ -120,9 +117,8 @@ onUnmounted(() => {
     />
 
     <Transition name="detail" mode="out-in">
-      <KaomojiGrid v-if="ui.view === 'kaomoji'" key="kaomoji" />
       <DetailPanel
-        v-else-if="activeItem"
+        v-if="activeItem"
         :key="`${ui.selectedType}-${ui.selectedId}`"
         :item="activeItem"
         :type="ui.selectedType!"

@@ -17,15 +17,21 @@ function persist(key: string, value: unknown): void {
 /** 智能分组折叠状态：默认折叠「已完成」 */
 const collapsedFallback: Record<'todo', string[]> = { todo: ['done'] }
 
+const VIEWS: ViewKind[] = ['todo', 'note', 'test']
+
+/** 读取上次视图；历史遗留的无效值回落到待办 */
+function loadView(): ViewKind {
+  const v = load<ViewKind>('ui.view', 'todo')
+  return VIEWS.includes(v) ? v : 'todo'
+}
+
 /** 界面状态：当前视图、待办排序、选中条目、文件夹、搜索、折叠 */
 export const ui = reactive({
-  view: load<ViewKind>('ui.view', 'todo'),
+  view: loadView(),
   todoSort: load<TodoSort>('ui.todoSort', 'smart'),
   noteSort: load<NoteSort>('ui.noteSort', 'updated'),
   selectedType: null as 'todo' | 'note' | null,
   selectedId: null as string | null,
-  /** 颜文字当前选中分类 id；'favorite' 为内置「常用」 */
-  kaomojiCategoryId: load<string>('ui.kaomojiCategoryId', 'favorite'),
   folderTodo: load<string | null>('ui.folderTodo', null),
   folderNote: load<string | null>('ui.folderNote', null),
   searchTodo: '',
@@ -42,11 +48,6 @@ export function setView(view: ViewKind): void {
   }
   if (ui.selectedType !== view) clearSelection()
   selectFirstOfView(view)
-}
-
-export function selectKaomojiCategory(id: string): void {
-  ui.kaomojiCategoryId = id
-  localStorage.setItem('ui.kaomojiCategoryId', id)
 }
 
 export function setTodoSort(sort: TodoSort): void {
